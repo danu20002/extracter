@@ -8,8 +8,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 public class ExtracterApplication {
 
 	public static void main(String[] args) {
-		// Disable zip bomb detection by setting a very low minimum inflate ratio
-		// This allows processing of Excel files with unusual compression ratios
 		ZipSecureFile.setMinInflateRatio(0.001);
 		
 		SpringApplication.run(ExtracterApplication.class, args);

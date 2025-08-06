@@ -44,11 +44,6 @@ public class ExcelParsingUtils {
             
             // Get sheet references from the workbook part
             InputStream workbookData = reader.getWorkbookData();
-            // Parse XML to extract sheet names - simplified approach
-            // In a real implementation, you would use proper XML parsing
-            
-            // Since XML parsing might be complex for this use case, we'll use a simpler approach:
-            // Try to create a workbook but only access sheet names, not the full content
             try (Workbook workbook = new XSSFWorkbook(pkg)) {
                 int numberOfSheets = workbook.getNumberOfSheets();
                 for (int i = 0; i < numberOfSheets; i++) {
