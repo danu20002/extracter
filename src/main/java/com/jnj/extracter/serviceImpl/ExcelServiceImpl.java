@@ -313,6 +313,31 @@ public class ExcelServiceImpl implements ExcelService {
         
         return data;
     }
+    
+    @Override
+    public List<String> getSheetNames(File file) {
+        if (!file.exists() || !file.isFile()) {
+            log.warn("Excel file does not exist: {}", file.getAbsolutePath());
+            return Collections.emptyList();
+        }
+        
+        String ext = FilenameUtils.getExtension(file.getName()).toLowerCase();
+        if (!ext.equals("xlsx") && !ext.equals("xls") && !ext.equals("xlsb")) {
+            log.warn("Not an Excel file: {}", file.getName());
+            return Collections.emptyList();
+        }
+        
+        try (Workbook workbook = WorkbookFactory.create(file)) {
+            List<String> sheetNames = new ArrayList<>();
+            for (int i = 0; i < workbook.getNumberOfSheets(); i++) {
+                sheetNames.add(workbook.getSheetName(i));
+            }
+            return sheetNames;
+        } catch (Exception e) {
+            log.error("Error getting sheet names from file: {}", file.getName(), e);
+            return Collections.emptyList();
+        }
+    }
 
     @Override
     public List<File> getExcelFiles() {

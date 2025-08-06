@@ -1,0 +1,176 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title th:text="'Sheet Data - ' + ${sheetName}">Sheet Data</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css">
+    <link rel="stylesheet" href="https://cdn.datatables.net/fixedheader/3.4.0/css/fixedHeader.bootstrap5.min.css">
+    <style>
+        .header-bg {
+            background: linear-gradient(135deg, #42275a, #734b6d);
+            color: white;
+        }
+        .dt-buttons .btn {
+            margin-right: 5px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <header class="header-bg py-3 mb-4">
+        <div class="container-fluid">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <nav aria-label="breadcrumb">
+                        <ol class="breadcrumb mb-0">
+                            <li class="breadcrumb-item"><a href="/excel" class="text-white">Home</a></li>
+                            <li class="breadcrumb-item"><a th:href="@{/excel/view/{fileName}(fileName=${fileName})}" class="text-white" th:text="${fileName}"></a></li>
+                            <li class="breadcrumb-item active text-white" aria-current="page" th:text="${sheetName}"></li>
+                        </ol>
+                    </nav>
+                    <h1 class="mt-2"><i class="bi bi-table"></i> <span th:text="${sheetName}"></span></h1>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <a href="/excel" class="btn btn-outline-light me-2">
+                        <i class="bi bi-house-door"></i> Home
+                    </a>
+                    <a href="/excel/analyze" class="btn btn-outline-light">
+                        <i class="bi bi-bar-chart"></i> Analyze
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container-fluid mb-5">
+        <!-- Data Stats -->
+        <div class="row mb-4">
+            <div class="col-md-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title text-primary">Total Rows</h5>
+                        <p class="display-4 mb-0" th:text="${data.size()}"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title text-success">Total Columns</h5>
+                        <p class="display-4 mb-0" th:text="${headers.size()}"></p>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="card shadow-sm h-100">
+                    <div class="card-body">
+                        <h5 class="card-title text-info">Analysis</h5>
+                        <div class="d-grid gap-2">
+                            <a th:href="@{/excel/analyze(fileName=${fileName},sheetName=${sheetName})}" class="btn btn-primary">
+                                <i class="bi bi-graph-up"></i> Analyze This Sheet
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Data Table -->
+        <div class="card shadow-sm">
+            <div class="card-header bg-white">
+                <h4 class="mb-0"><i class="bi bi-grid-3x3"></i> Sheet Data</h4>
+            </div>
+            <div class="card-body">
+                <div th:if="${data.isEmpty()}" class="alert alert-info">
+                    No data available in this sheet.
+                </div>
+                <div th:unless="${data.isEmpty()}" class="table-responsive">
+                    <table class="table table-striped table-hover" id="dataTable">
+                        <thead>
+                            <tr>
+                                <th>Row</th>
+                                <th th:each="header : ${headers}" th:text="${header}"></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            <tr th:each="row : ${data}">
+                                <td th:text="${row.getRowNumber()}"></td>
+                                <td th:each="header : ${headers}" th:text="${row.getData() != null ? row.getData().get(header) : ''}"></td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-dark text-white py-4 mt-auto">
+        <div class="container-fluid">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Excel Data Explorer</h5>
+                    <p class="small">A tool for extracting and analyzing Excel data.</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="small">© 2025 JNJ Extracter</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/jquery.dataTables.min.js"></script>
+    <script src="https://cdn.datatables.net/1.13.7/js/dataTables.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/dataTables.buttons.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.print.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/pdfmake.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdfmake/0.2.7/vfs_fonts.js"></script>
+    <script src="https://cdn.datatables.net/fixedheader/3.4.0/js/dataTables.fixedHeader.min.js"></script>
+    <script>
+        $(document).ready(function() {
+            $('#dataTable').DataTable({
+                dom: 'Bfrtip',
+                buttons: [
+                    {
+                        extend: 'copy',
+                        className: 'btn btn-outline-primary'
+                    },
+                    {
+                        extend: 'excel',
+                        className: 'btn btn-outline-success',
+                        title: 'Excel Data - ' + $('#sheetName').text()
+                    },
+                    {
+                        extend: 'csv',
+                        className: 'btn btn-outline-info',
+                        title: 'Excel Data - ' + $('#sheetName').text()
+                    },
+                    {
+                        extend: 'pdf',
+                        className: 'btn btn-outline-danger',
+                        title: 'Excel Data - ' + $('#sheetName').text()
+                    },
+                    {
+                        extend: 'print',
+                        className: 'btn btn-outline-dark'
+                    }
+                ],
+                fixedHeader: {
+                    header: true
+                },
+                "pageLength": 25,
+                "lengthMenu": [10, 25, 50, 100, 250],
+                "ordering": true,
+                "order": [[0, "asc"]]
+            });
+        });
+    </script>
+</body>
+</html>

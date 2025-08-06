@@ -25,6 +25,11 @@ public interface ExcelService {
     List<ExcelData> extractSheetData(File file, String sheetName);
     
     /**
+     * Get sheet names from a specific Excel file
+     */
+    List<String> getSheetNames(File file);
+    
+    /**
      * Get all available Excel files in the excel folder
      */
     List<File> getExcelFiles();

@@ -95,6 +95,12 @@
 			<artifactId>jackson-databind</artifactId>
 		</dependency>
 		
+		<!-- Thymeleaf for web templates -->
+		<dependency>
+			<groupId>org.springframework.boot</groupId>
+			<artifactId>spring-boot-starter-thymeleaf</artifactId>
+		</dependency>
+		
 		<!-- Protocol Buffers for faster serialization/deserialization -->
 		<dependency>
 			<groupId>com.google.protobuf</groupId>

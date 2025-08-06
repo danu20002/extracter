@@ -1,0 +1,459 @@
+<!DOCTYPE html>
+<html xmlns:th="http://www.thymeleaf.org">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Analysis Results - Excel Explorer</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.css">
+    <style>
+        .header-bg {
+            background: linear-gradient(135deg, #42275a, #734b6d);
+            color: white;
+        }
+        .result-card {
+            transition: transform 0.3s;
+            border-radius: 10px;
+            overflow: hidden;
+        }
+        .result-card:hover {
+            transform: translateY(-5px);
+            box-shadow: 0 10px 20px rgba(0, 0, 0, 0.1);
+        }
+        .chart-container {
+            height: 300px;
+        }
+    </style>
+</head>
+<body class="bg-light">
+    <header class="header-bg py-3 mb-4">
+        <div class="container">
+            <div class="row align-items-center">
+                <div class="col-md-8">
+                    <h1><i class="bi bi-graph-up-arrow"></i> Analysis Results</h1>
+                    <p class="lead">
+                        <span th:text="${operation}"></span> analysis of 
+                        <strong th:text="${fileName}"></strong>
+                        <span th:if="${sheetName != null && !sheetName.isEmpty()}">
+                            - Sheet: <strong th:text="${sheetName}"></strong>
+                        </span>
+                    </p>
+                </div>
+                <div class="col-md-4 text-md-end">
+                    <a href="/excel" class="btn btn-outline-light me-2">
+                        <i class="bi bi-house-door"></i> Home
+                    </a>
+                    <a href="/excel/analyze" class="btn btn-outline-light">
+                        <i class="bi bi-graph-up"></i> New Analysis
+                    </a>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <div class="container mb-5">
+        <!-- Error Message -->
+        <div th:if="${result != null and result.containsKey('error')}" class="alert alert-danger mb-4" role="alert">
+            <h4 class="alert-heading"><i class="bi bi-exclamation-triangle-fill"></i> Error</h4>
+            <p th:text="${result.get('error')}"></p>
+            <hr>
+            <p class="mb-0">Available operations: 
+                <span th:if="${result.containsKey('availableOperations')}" th:text="${#strings.listJoin(result.get('availableOperations'), ', ')}"></span>
+            </p>
+        </div>
+        
+        <!-- Count Result -->
+        <div th:if="${operation == 'count'}" class="row">
+            <div class="col-md-6 mx-auto">
+                <div class="card result-card shadow">
+                    <div class="card-body text-center p-5">
+                        <h2 class="card-title">Total Records</h2>
+                        <p class="display-1 text-primary mb-0" th:text="${result.get('totalRecords')}"></p>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Summary Result -->
+        <div th:if="${operation == 'summary'}" class="row">
+            <div class="col-md-4 mb-4">
+                <div class="card result-card shadow h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">Basic Statistics</h5>
+                        <ul class="list-group list-group-flush">
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Total Records
+                                <span class="badge bg-primary rounded-pill" th:text="${result.get('totalRecords')}"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Unique Files
+                                <span class="badge bg-success rounded-pill" th:text="${result.get('uniqueFiles')}"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Unique Sheets
+                                <span class="badge bg-info rounded-pill" th:text="${result.get('uniqueSheets')}"></span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center">
+                                Unique Columns
+                                <span class="badge bg-warning rounded-pill" th:text="${result.get('uniqueColumns')}"></span>
+                            </li>
+                        </ul>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card result-card shadow h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">File Distribution</h5>
+                        <div class="chart-container" id="fileChart"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-4 mb-4">
+                <div class="card result-card shadow h-100">
+                    <div class="card-body">
+                        <h5 class="card-title">Sheet Distribution</h5>
+                        <div class="chart-container" id="sheetChart"></div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-md-12 mb-4">
+                <div class="card result-card shadow">
+                    <div class="card-body">
+                        <h5 class="card-title">Top Columns</h5>
+                        <div th:if="${result.containsKey('topColumns')}">
+                            <div class="table-responsive">
+                                <table class="table table-striped">
+                                    <thead>
+                                        <tr>
+                                            <th>Column Name</th>
+                                            <th>Frequency</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr th:each="entry : ${result.get('topColumns')}">
+                                            <td th:text="${entry.key}"></td>
+                                            <td th:text="${entry.value}"></td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Group By Results -->
+        <div th:if="${operation == 'groupbysheet' || operation == 'groupbyfile'}" class="row">
+            <div class="col-12">
+                <div class="card result-card shadow">
+                    <div class="card-body">
+                        <h5 class="card-title" th:text="${operation == 'groupbysheet' ? 'Grouped by Sheet' : 'Grouped by File'}"></h5>
+                        <div class="chart-container" id="groupChart"></div>
+                        <div class="table-responsive mt-4">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th th:text="${operation == 'groupbysheet' ? 'Sheet Name' : 'File Name'}"></th>
+                                        <th>Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="entry : ${operation == 'groupbysheet' ? result.get('groupedBySheet') : result.get('groupedByFile')}">
+                                        <td th:text="${entry.key}"></td>
+                                        <td th:text="${entry.value}"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Numeric Analysis -->
+        <div th:if="${operation == 'numeric_analysis' && result.containsKey('numericStats')}" class="row">
+            <div class="col-12 mb-4">
+                <div class="card result-card shadow">
+                    <div class="card-body">
+                        <h5 class="card-title">Numeric Statistics</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Column</th>
+                                        <th>Min</th>
+                                        <th>Max</th>
+                                        <th>Avg</th>
+                                        <th>Sum</th>
+                                        <th>Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="entry : ${result.get('numericStats')}">
+                                        <td th:text="${entry.key}"></td>
+                                        <td th:text="${entry.value.min}"></td>
+                                        <td th:text="${entry.value.max}"></td>
+                                        <td th:text="${#numbers.formatDecimal(entry.value.avg, 1, 2)}"></td>
+                                        <td th:text="${entry.value.sum}"></td>
+                                        <td th:text="${entry.value.count}"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="col-12">
+                <div class="card result-card shadow">
+                    <div class="card-body">
+                        <h5 class="card-title">Distribution Visualization</h5>
+                        <div class="chart-container" id="numericChart"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Column Statistics -->
+        <div th:if="${operation == 'column_stats' && result.containsKey('columnStats')}" class="row">
+            <div class="col-12">
+                <div class="card result-card shadow">
+                    <div class="card-body">
+                        <h5 class="card-title">Column Statistics</h5>
+                        <div class="table-responsive">
+                            <table class="table table-striped">
+                                <thead>
+                                    <tr>
+                                        <th>Column</th>
+                                        <th>Type</th>
+                                        <th>Unique Values</th>
+                                        <th>Missing Values</th>
+                                        <th>Top Value</th>
+                                        <th>Top Count</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr th:each="entry : ${result.get('columnStats')}">
+                                        <td th:text="${entry.key}"></td>
+                                        <td th:text="${entry.value.type}"></td>
+                                        <td th:text="${entry.value.uniqueCount}"></td>
+                                        <td th:text="${entry.value.missingCount}"></td>
+                                        <td th:text="${entry.value.topValue}"></td>
+                                        <td th:text="${entry.value.topCount}"></td>
+                                    </tr>
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <!-- Raw Result Data (for debugging) -->
+        <div class="card mt-4">
+            <div class="card-header bg-light">
+                <button class="btn btn-sm btn-outline-secondary" type="button" data-bs-toggle="collapse" 
+                        data-bs-target="#rawDataCollapse">
+                    Show Raw Data
+                </button>
+            </div>
+            <div class="collapse" id="rawDataCollapse">
+                <div class="card-body">
+                    <pre class="bg-light p-3"><code th:text="${result}"></code></pre>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <footer class="bg-dark text-white py-4 mt-auto">
+        <div class="container">
+            <div class="row">
+                <div class="col-md-6">
+                    <h5>Excel Data Explorer</h5>
+                    <p class="small">A tool for extracting and analyzing Excel data.</p>
+                </div>
+                <div class="col-md-6 text-md-end">
+                    <p class="small">© 2025 JNJ Extracter</p>
+                </div>
+            </div>
+        </div>
+    </footer>
+
+    <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+    
+    <!-- Initialize Charts Based on Result Data -->
+    <script th:inline="javascript">
+        $(document).ready(function() {
+            const operation = /*[[${operation}]]*/ 'count';
+            const result = /*[[${result}]]*/ {};
+            
+            // Summary Charts
+            if (operation === 'summary') {
+                if (result.get('fileDistribution')) {
+                    const fileCtx = document.getElementById('fileChart');
+                    new Chart(fileCtx, {
+                        type: 'pie',
+                        data: {
+                            labels: Object.keys(result.get('fileDistribution')),
+                            datasets: [{
+                                data: Object.values(result.get('fileDistribution')),
+                                backgroundColor: generateColors(Object.keys(result.get('fileDistribution')).length)
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }
+                    });
+                }
+                
+                if (result.get('sheetDistribution')) {
+                    const sheetCtx = document.getElementById('sheetChart');
+                    new Chart(sheetCtx, {
+                        type: 'pie',
+                        data: {
+                            labels: Object.keys(result.get('sheetDistribution')),
+                            datasets: [{
+                                data: Object.values(result.get('sheetDistribution')),
+                                backgroundColor: generateColors(Object.keys(result.get('sheetDistribution')).length)
+                            }]
+                        },
+                        options: {
+                            responsive: true,
+                            maintainAspectRatio: false
+                        }
+                    });
+                }
+            }
+            
+            // Group By Charts
+            if (operation === 'groupbysheet' && result.get('groupedBySheet')) {
+                const groupCtx = document.getElementById('groupChart');
+                new Chart(groupCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(result.get('groupedBySheet')),
+                        datasets: [{
+                            label: 'Records per Sheet',
+                            data: Object.values(result.get('groupedBySheet')),
+                            backgroundColor: generateColors(Object.keys(result.get('groupedBySheet')).length)
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+            
+            if (operation === 'groupbyfile' && result.get('groupedByFile')) {
+                const groupCtx = document.getElementById('groupChart');
+                new Chart(groupCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: Object.keys(result.get('groupedByFile')),
+                        datasets: [{
+                            label: 'Records per File',
+                            data: Object.values(result.get('groupedByFile')),
+                            backgroundColor: generateColors(Object.keys(result.get('groupedByFile')).length)
+                        }]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+            
+            // Numeric Analysis Chart
+            if (operation === 'numeric_analysis' && result.get('numericStats')) {
+                const numCtx = document.getElementById('numericChart');
+                const numericStats = result.get('numericStats');
+                const labels = Object.keys(numericStats);
+                const avgData = labels.map(key => numericStats[key].avg);
+                const minData = labels.map(key => numericStats[key].min);
+                const maxData = labels.map(key => numericStats[key].max);
+                
+                new Chart(numCtx, {
+                    type: 'bar',
+                    data: {
+                        labels: labels,
+                        datasets: [
+                            {
+                                label: 'Average',
+                                data: avgData,
+                                backgroundColor: 'rgba(54, 162, 235, 0.5)',
+                                borderColor: 'rgba(54, 162, 235, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Min',
+                                data: minData,
+                                backgroundColor: 'rgba(255, 99, 132, 0.5)',
+                                borderColor: 'rgba(255, 99, 132, 1)',
+                                borderWidth: 1
+                            },
+                            {
+                                label: 'Max',
+                                data: maxData,
+                                backgroundColor: 'rgba(75, 192, 192, 0.5)',
+                                borderColor: 'rgba(75, 192, 192, 1)',
+                                borderWidth: 1
+                            }
+                        ]
+                    },
+                    options: {
+                        responsive: true,
+                        maintainAspectRatio: false,
+                        scales: {
+                            y: {
+                                beginAtZero: true
+                            }
+                        }
+                    }
+                });
+            }
+        });
+        
+        // Generate colors for charts
+        function generateColors(count) {
+            const colors = [
+                '#4dc9f6', '#f67019', '#f53794', '#537bc4', '#acc236', '#166a8f', 
+                '#00a950', '#58595b', '#8549ba', '#e6194b', '#3cb44b', '#ffe119', 
+                '#4363d8', '#f58231', '#911eb4', '#46f0f0', '#f032e6', '#bcf60c', 
+                '#fabebe', '#008080', '#e6beff', '#9a6324', '#fffac8', '#800000', 
+                '#aaffc3', '#808000', '#ffd8b1', '#000075', '#808080', '#000000'
+            ];
+            
+            // If we need more colors than available, generate them
+            if (count > colors.length) {
+                for (let i = colors.length; i < count; i++) {
+                    const r = Math.floor(Math.random() * 255);
+                    const g = Math.floor(Math.random() * 255);
+                    const b = Math.floor(Math.random() * 255);
+                    colors.push(`rgba(${r}, ${g}, ${b}, 0.7)`);
+                }
+            }
+            
+            return colors.slice(0, count);
+        }
+    </script>
+</body>
+</html>
