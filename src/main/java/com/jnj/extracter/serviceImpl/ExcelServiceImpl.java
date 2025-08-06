@@ -1,9 +1,13 @@
 package com.jnj.extracter.serviceImpl;
 
+import com.jnj.extracter.config.ExcelProcessingConfig;
 import com.jnj.extracter.entity.ExcelData;
 import com.jnj.extracter.entity.ExcelProcessingResult;
 import com.jnj.extracter.service.ExcelService;
+import com.jnj.extracter.service.MetricsService;
 import com.jnj.extracter.util.ExcelParsingUtils;
+import com.jnj.extracter.util.MemoryMappedFileHandler;
+import com.jnj.extracter.util.ProtoConverter;
 import lombok.extern.slf4j.Slf4j;
 
 import org.apache.poi.ss.usermodel.Workbook;
@@ -17,39 +21,142 @@ import org.apache.poi.xssf.usermodel.XSSFWorkbook;
 import org.apache.poi.openxml4j.opc.OPCPackage;
 import org.apache.poi.openxml4j.opc.PackageAccess;
 import org.apache.poi.openxml4j.util.ZipSecureFile;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
+import java.nio.MappedByteBuffer;
+import java.nio.channels.FileChannel;
+import java.time.Duration;
+import java.time.Instant;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.stream.Collectors;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.nio.file.Paths;
 import org.apache.commons.io.FilenameUtils;
 
 @Slf4j
 @Service
 public class ExcelServiceImpl implements ExcelService {
 
-    private static final String EXCEL_FOLDER_PATH = "excel";
-    private static final String TEMP_FOLDER_PATH = "excel/temp";
+    private final ExcelProcessingConfig config;
+    private final MemoryMappedFileHandler memoryMapper;
+    private final MetricsService metricsService;
+    private final ProtoConverter protoConverter;
+    private final ExecutorService executorService;
+    
     private static final DateTimeFormatter FORMATTER = DateTimeFormatter.ofPattern("yyyy-MM-dd HH:mm:ss");
+    private static final String TEMP_FOLDER_PATH = "excel/temp";
+    
+    @Autowired
+    public ExcelServiceImpl(ExcelProcessingConfig config, 
+                           MemoryMappedFileHandler memoryMapper, 
+                           MetricsService metricsService,
+                           ProtoConverter protoConverter) {
+        this.config = config;
+        this.memoryMapper = memoryMapper;
+        this.metricsService = metricsService;
+        this.protoConverter = protoConverter;
+        this.executorService = Executors.newFixedThreadPool(config.getThreadPoolSize());
+        
+        // Initialize POI settings globally
+        ZipSecureFile.setMinInflateRatio(0.0001);
+        ZipSecureFile.setMaxEntrySize(100 * 1024 * 1024);
+        System.setProperty("org.apache.poi.xssf.parsemode", "tolerant");
+        System.setProperty("org.apache.poi.ooxml.strict", "false");
+        
+        log.info("Excel Service initialized with parallel processing={}, threadPoolSize={}, useMemoryMapped={}",
+                config.isParallelProcessing(), config.getThreadPoolSize(), config.isUseMemoryMapped());
+    }
 
     @Override
     public List<ExcelProcessingResult> extractAllExcelFiles() {
+        Instant startTime = Instant.now();
         List<File> excelFiles = getExcelFiles();
         List<ExcelProcessingResult> results = new ArrayList<>();
         
+        if (config.isParallelProcessing() && excelFiles.size() > 1) {
+            log.info("Using parallel processing for {} Excel files", excelFiles.size());
+            
+            try {
+                // Process files in parallel using CompletableFuture
+                List<CompletableFuture<ExcelProcessingResult>> futures = excelFiles.stream()
+                    .map(file -> CompletableFuture.supplyAsync(() -> {
+                        try {
+                            ExcelProcessingResult result = extractExcelFile(file);
+                            log.info("Successfully processed file: {}", file.getName());
+                            return result;
+                        } catch (Exception e) {
+                            log.error("Error processing file: {}", file.getName(), e);
+                            ExcelProcessingResult errorResult = new ExcelProcessingResult();
+                            errorResult.setFileName(file.getName());
+                            errorResult.setSuccess(false);
+                            errorResult.setMessage("Error: " + e.getMessage());
+                            metricsService.recordProcessingError(e.getClass().getSimpleName());
+                            return errorResult;
+                        }
+                    }, executorService))
+                    .collect(Collectors.toList());
+                
+                // Wait for all futures to complete and collect results
+                CompletableFuture<Void> allFutures = CompletableFuture.allOf(
+                    futures.toArray(new CompletableFuture[0])
+                );
+                
+                // Get all results
+                results = allFutures.thenApply(v -> 
+                    futures.stream()
+                        .map(CompletableFuture::join)
+                        .collect(Collectors.toList())
+                ).get();
+                
+            } catch (Exception e) {
+                log.error("Error in parallel processing: {}", e.getMessage(), e);
+                // Fall back to sequential processing
+                return extractAllFilesSequentially(excelFiles);
+            }
+        } else {
+            // Sequential processing
+            results = extractAllFilesSequentially(excelFiles);
+        }
+        
+        Instant endTime = Instant.now();
+        long elapsedTime = Duration.between(startTime, endTime).toMillis();
+        log.info("Processed {} Excel files in {} ms", excelFiles.size(), elapsedTime);
+        metricsService.recordMemoryUsage();
+        
+        return results;
+    }
+    
+    /**
+     * Process all Excel files sequentially.
+     * 
+     * @param excelFiles List of Excel files to process
+     * @return List of processing results
+     */
+    private List<ExcelProcessingResult> extractAllFilesSequentially(List<File> excelFiles) {
+        List<ExcelProcessingResult> results = new ArrayList<>();
+        
         for (File file : excelFiles) {
+            Instant fileStartTime = Instant.now();
             try {
                 ExcelProcessingResult result = extractExcelFile(file);
                 results.add(result);
                 log.info("Successfully processed file: {}", file.getName());
+                
+                // Record metrics
+                String extension = FilenameUtils.getExtension(file.getName()).toLowerCase();
+                metricsService.recordFileProcessed(extension);
+                if (result.getTotalRows() > 0) {
+                    metricsService.recordRowsProcessed(result.getTotalRows());
+                }
+                
             } catch (Exception e) {
                 log.error("Error processing file: {}", file.getName(), e);
                 ExcelProcessingResult errorResult = new ExcelProcessingResult();
@@ -57,6 +164,11 @@ public class ExcelServiceImpl implements ExcelService {
                 errorResult.setSuccess(false);
                 errorResult.setMessage("Error: " + e.getMessage());
                 results.add(errorResult);
+                metricsService.recordProcessingError(e.getClass().getSimpleName());
+            } finally {
+                Instant fileEndTime = Instant.now();
+                long fileElapsedTime = Duration.between(fileStartTime, fileEndTime).toMillis();
+                metricsService.recordFileProcessingTime(file.getName(), fileElapsedTime);
             }
         }
         
@@ -204,7 +316,7 @@ public class ExcelServiceImpl implements ExcelService {
 
     @Override
     public List<File> getExcelFiles() {
-        File excelDir = new File(EXCEL_FOLDER_PATH);
+        File excelDir = new File(config.getExcelFolderPath());
         List<File> excelFiles = new ArrayList<>();
         
         if (excelDir.exists() && excelDir.isDirectory()) {
@@ -218,19 +330,34 @@ public class ExcelServiceImpl implements ExcelService {
                 
                 return lowercase.endsWith(".xlsx") || 
                        lowercase.endsWith(".xls") ||
-                       lowercase.endsWith(".xlsb");
+                       lowercase.endsWith(".xlsb") ||
+                       lowercase.endsWith(".csv"); // Added CSV support
             });
             
             if (files != null) {
+                log.info("Found {} Excel files in directory: {}", files.length, config.getExcelFolderPath());
                 excelFiles.addAll(Arrays.asList(files));
+                
+                // Log details about each file
                 for (File file : files) {
-                    if (file.getName().toLowerCase().endsWith(".xlsb")) {
-                        log.info("Found XLSB file: {}. Note: XLSB format has limited support.", file.getName());
+                    String extension = FilenameUtils.getExtension(file.getName()).toLowerCase();
+                    long fileSizeMB = file.length() / (1024 * 1024);
+                    
+                    if (extension.equals("xlsb")) {
+                        log.info("Found XLSB file: {} ({} MB). Note: XLSB format has limited support.", 
+                                file.getName(), fileSizeMB);
+                    } else {
+                        log.debug("Found Excel file: {} ({} MB)", file.getName(), fileSizeMB);
                     }
                 }
             }
         } else {
-            log.warn("Excel directory '{}' does not exist", EXCEL_FOLDER_PATH);
+            log.warn("Excel directory '{}' does not exist", config.getExcelFolderPath());
+            // Create the directory
+            boolean created = excelDir.mkdirs();
+            if (created) {
+                log.info("Created Excel directory: {}", config.getExcelFolderPath());
+            }
         }
         
         return excelFiles;
@@ -271,6 +398,7 @@ public class ExcelServiceImpl implements ExcelService {
             default:
                 result.put("error", "Unknown operation: " + operation);
                 result.put("availableOperations", Arrays.asList("count", "summary", "groupBySheet", "groupByFile", "numeric_analysis"));
+                break;
         }
         
         return result;
@@ -298,13 +426,45 @@ public class ExcelServiceImpl implements ExcelService {
     }
 
     private Workbook createWorkbook(File file, FileInputStream fis) throws IOException {
+        Instant startTime = Instant.now();
+        MappedByteBuffer mappedBuffer = null;
+        
         try {
             // Set zip parameters to bypass zip bomb detection for this specific operation
-            // This allows processing of Excel files with unusual compression ratios
-            org.apache.poi.openxml4j.util.ZipSecureFile.setMinInflateRatio(0.0001); // More permissive ratio
-            org.apache.poi.openxml4j.util.ZipSecureFile.setMaxEntrySize(100 * 1024 * 1024); // 100MB max entry size
+            ZipSecureFile.setMinInflateRatio(0.0001); // More permissive ratio
+            ZipSecureFile.setMaxEntrySize(100 * 1024 * 1024); // 100MB max entry size
             
             String fileName = file.getName().toLowerCase();
+            long fileSize = file.length() / (1024 * 1024); // Size in MB
+            
+            log.debug("Creating workbook for file: {} ({}MB)", file.getName(), fileSize);
+            
+            // Use memory-mapped files for better performance with large files
+            if (config.isUseMemoryMapped() && fileSize > 5) { // Only for files > 5MB
+                try {
+                    log.debug("Using memory-mapped approach for large file: {}", file.getName());
+                    fis.close(); // Close the input stream as we'll use memory mapping
+                    
+                    if (fileName.endsWith(".xlsx")) {
+                        // For XLSX files, use OPC package with memory-mapped buffer
+                        mappedBuffer = memoryMapper.createMemoryMappedBuffer(file);
+                        try (OPCPackage pkg = OPCPackage.open(file, PackageAccess.READ)) {
+                            return new XSSFWorkbook(pkg);
+                        }
+                    } else if (fileName.endsWith(".xls")) {
+                        // For XLS files, use direct buffering
+                        ByteBuffer buffer = memoryMapper.readFileToDirectBuffer(file, config.getBufferSize());
+                        return new HSSFWorkbook(fis);
+                    }
+                    // For other formats, fall back to standard approach
+                } catch (Exception e) {
+                    log.warn("Memory-mapped approach failed, falling back to standard: {}", e.getMessage());
+                    // Reopen the stream
+                    fis = new FileInputStream(file);
+                }
+            }
+            
+            // Process by file type
             if (fileName.endsWith(".xlsb")) {
                 log.warn("XLSB file detected: {}. Attempting direct processing, but this format has limited support.", file.getName());
                 
@@ -325,6 +485,11 @@ public class ExcelServiceImpl implements ExcelService {
                         throw new IOException("This XLSB file format cannot be processed. Please convert it to XLSX format.", ex);
                     }
                 }
+            } else if (fileName.endsWith(".csv")) {
+                // For CSV files, we create a wrapper that makes them appear as Excel workbooks
+                log.info("CSV file detected: {}. Creating wrapper workbook.", file.getName());
+                // This would require CSV workbook implementation - for now just throw exception
+                throw new IOException("CSV files not yet supported directly. Please convert to Excel format.");
             } else {
                 // For other Excel files, try using custom loading to handle corrupted pivot tables
                 try {
@@ -378,61 +543,192 @@ public class ExcelServiceImpl implements ExcelService {
             }
         } catch (Exception e) {
             log.error("Error creating workbook for file: {}", file.getName(), e);
+            metricsService.recordProcessingError("WorkbookCreation");
             throw new IOException("Failed to create workbook: " + e.getMessage(), e);
+        } finally {
+            Instant endTime = Instant.now();
+            long elapsedTime = Duration.between(startTime, endTime).toMillis();
+            log.debug("Workbook creation took {} ms for file: {}", elapsedTime, file.getName());
+            
+            // Release memory-mapped buffer if used
+            if (mappedBuffer != null) {
+                memoryMapper.releaseBuffer(mappedBuffer);
+            }
         }
     }
 
     private List<ExcelData> extractDataFromSheet(Sheet sheet, String fileName) {
+        Instant startTime = Instant.now();
         List<ExcelData> sheetData = new ArrayList<>();
         
         if (sheet.getPhysicalNumberOfRows() == 0) {
             return sheetData;
         }
         
-        // Get header row and determine all columns dynamically
-        Row headerRow = sheet.getRow(sheet.getFirstRowNum());
-        List<String> headers = new ArrayList<>();
-        int maxColumns = 0;
-        
-        // First pass: determine the maximum number of columns across all rows
-        for (int rowIndex = sheet.getFirstRowNum(); rowIndex <= sheet.getLastRowNum(); rowIndex++) {
-            Row row = sheet.getRow(rowIndex);
-            if (row != null) {
-                maxColumns = Math.max(maxColumns, row.getLastCellNum());
-            }
-        }
-        
-        // Extract headers from the first row, extending to maxColumns
-        if (headerRow != null) {
-            for (int cellIndex = 0; cellIndex < maxColumns; cellIndex++) {
-                Cell cell = headerRow.getCell(cellIndex);
-                String headerValue = getCellValueAsString(cell);
+        try {
+            // Get header row and determine all columns dynamically
+            int firstRowNum = sheet.getFirstRowNum();
+            Row headerRow = sheet.getRow(firstRowNum);
+            Map<Integer, String> columnIndexToHeaderMap = new HashMap<>();
+            Set<Integer> cellIndexes = new HashSet<>();
+            int maxColumns = 0;
+            
+            // Phase 1: Analyze the sheet structure - determine used columns
+            log.debug("Analyzing structure of sheet '{}' in file '{}'", sheet.getSheetName(), fileName);
+            
+            // First pass: determine the maximum number of columns across all rows
+            // Use a sample of rows for better performance on very large sheets
+            int lastRowNum = sheet.getLastRowNum();
+            int rowCount = lastRowNum - firstRowNum + 1;
+            
+            // For very large sheets, sample rows instead of scanning all
+            int sampleSize = Math.min(rowCount, 1000); // Sample at most 1000 rows
+            int step = rowCount / sampleSize;
+            if (step < 1) step = 1;
+            
+            // First analyze data rows to find all used columns
+            for (int rowIndex = firstRowNum; rowIndex <= lastRowNum; rowIndex += step) {
+                Row row = sheet.getRow(rowIndex);
+                if (row == null) continue;
                 
-                // If header is empty, generate a default name
-                if (headerValue == null || headerValue.trim().isEmpty()) {
-                    headerValue = "Column_" + (cellIndex + 1);
+                short lastCellNum = row.getLastCellNum();
+                if (lastCellNum > maxColumns) {
+                    maxColumns = lastCellNum;
                 }
-                headers.add(headerValue);
+                
+                // Collect all cell indexes that have data
+                for (Cell cell : row) {
+                    int cellIndex = cell.getColumnIndex();
+                    Object value = getCellValue(cell);
+                    if (value != null && !value.toString().trim().isEmpty()) {
+                        cellIndexes.add(cellIndex);
+                    }
+                }
             }
-        } else {
-            // No header row found, generate default headers
-            for (int i = 0; i < maxColumns; i++) {
-                headers.add("Column_" + (i + 1));
+            
+            log.debug("Sheet '{}' has maximum of {} columns with data in {} positions", 
+                    sheet.getSheetName(), maxColumns, cellIndexes.size());
+            
+            // Phase 2: Extract headers
+            List<String> headers = new ArrayList<>();
+            
+            // Deduplicate header names to ensure uniqueness
+            Set<String> usedHeaderNames = new HashSet<>();
+            
+            if (headerRow != null) {
+                // Get all headers from the first row
+                for (int cellIndex = 0; cellIndex < maxColumns; cellIndex++) {
+                    String headerValue;
+                    Cell cell = headerRow.getCell(cellIndex);
+                    
+                    // If this column was used in any row, ensure it has a header
+                    if (cellIndexes.contains(cellIndex) || cell != null) {
+                        headerValue = getCellValueAsString(cell);
+                        
+                        // Handle empty or duplicate headers
+                        if (headerValue == null || headerValue.trim().isEmpty()) {
+                            headerValue = "Column_" + (cellIndex + 1);
+                        }
+                        
+                        // Ensure header name uniqueness
+                        String originalHeader = headerValue;
+                        int suffix = 1;
+                        while (usedHeaderNames.contains(headerValue.toLowerCase())) {
+                            headerValue = originalHeader + "_" + suffix;
+                            suffix++;
+                        }
+                        
+                        usedHeaderNames.add(headerValue.toLowerCase());
+                        columnIndexToHeaderMap.put(cellIndex, headerValue);
+                    }
+                }
+            } else {
+                // No header row found, generate default headers for all used columns
+                for (Integer cellIndex : cellIndexes) {
+                    String headerValue = "Column_" + (cellIndex + 1);
+                    columnIndexToHeaderMap.put(cellIndex, headerValue);
+                }
             }
+            
+            // Sort headers by column index
+            headers = columnIndexToHeaderMap.entrySet().stream()
+                .sorted(Map.Entry.comparingByKey())
+                .map(Map.Entry::getValue)
+                .collect(Collectors.toList());
+            
+            log.debug("Extracted {} column headers from sheet '{}': {}", 
+                    headers.size(), sheet.getSheetName(), 
+                    headers.size() > 10 ? headers.subList(0, 10) + "..." : headers);
+            
+            // Phase 3: Process data rows in batches for better memory efficiency
+            int startRow = firstRowNum + 1; // Skip header
+            if (headerRow == null) startRow = firstRowNum;
+            
+            List<Integer> rowIndexes = new ArrayList<>();
+            for (int i = startRow; i <= lastRowNum; i++) {
+                rowIndexes.add(i);
+            }
+            
+            // Process in batches to reduce memory pressure
+            int batchSize = config.getBatchSize();
+            int totalRows = rowIndexes.size();
+            int batches = (totalRows + batchSize - 1) / batchSize;
+            
+            log.debug("Processing {} rows in {} batches of size {}", 
+                    totalRows, batches, batchSize);
+            
+            for (int batchIndex = 0; batchIndex < batches; batchIndex++) {
+                int fromIndex = batchIndex * batchSize;
+                int toIndex = Math.min(fromIndex + batchSize, totalRows);
+                
+                List<Integer> batchRowIndexes = rowIndexes.subList(fromIndex, toIndex);
+                List<ExcelData> batchData = processBatch(sheet, fileName, batchRowIndexes, columnIndexToHeaderMap);
+                sheetData.addAll(batchData);
+            }
+            
+        } catch (Exception e) {
+            log.error("Error extracting data from sheet '{}' in file '{}'", sheet.getSheetName(), fileName, e);
+            metricsService.recordProcessingError("SheetProcessing");
         }
         
-        // Process data rows (skip header row)
-        for (int rowIndex = sheet.getFirstRowNum() + 1; rowIndex <= sheet.getLastRowNum(); rowIndex++) {
+        Instant endTime = Instant.now();
+        long elapsedTime = Duration.between(startTime, endTime).toMillis();
+        log.info("Extracted {} rows from sheet '{}' in {} ms", 
+                sheetData.size(), sheet.getSheetName(), elapsedTime);
+        
+        // Record metrics
+        metricsService.recordSheetProcessingTime(sheet.getSheetName(), elapsedTime);
+        metricsService.recordRowsProcessed(sheetData.size());
+        
+        return sheetData;
+    }
+    
+    /**
+     * Process a batch of rows from an Excel sheet.
+     * 
+     * @param sheet The sheet to process
+     * @param fileName The name of the file
+     * @param rowIndexes The indexes of the rows to process
+     * @param columnIndexToHeaderMap Mapping of column indexes to header names
+     * @return List of ExcelData objects for the batch
+     */
+    private List<ExcelData> processBatch(Sheet sheet, String fileName, List<Integer> rowIndexes, 
+                                        Map<Integer, String> columnIndexToHeaderMap) {
+        List<ExcelData> batchData = new ArrayList<>();
+        
+        for (Integer rowIndex : rowIndexes) {
             Row row = sheet.getRow(rowIndex);
             if (row == null) continue;
             
             Map<String, Object> rowData = new HashMap<>();
             boolean hasData = false;
             
-            // Extract data for all columns
-            for (int cellIndex = 0; cellIndex < headers.size(); cellIndex++) {
+            // Extract data for all mapped columns
+            for (Map.Entry<Integer, String> entry : columnIndexToHeaderMap.entrySet()) {
+                int cellIndex = entry.getKey();
+                String header = entry.getValue();
+                
                 Cell cell = row.getCell(cellIndex);
-                String header = headers.get(cellIndex);
                 Object cellValue = getCellValue(cell);
                 
                 if (cellValue != null && !cellValue.toString().trim().isEmpty()) {
@@ -447,18 +743,15 @@ public class ExcelServiceImpl implements ExcelService {
                 ExcelData excelData = new ExcelData();
                 excelData.setFileName(fileName);
                 excelData.setSheetName(sheet.getSheetName());
-                excelData.setRowNumber(rowIndex + 1);
+                excelData.setRowNumber(rowIndex + 1); // 1-based row numbers for user display
                 excelData.setData(rowData);
                 excelData.setExtractedAt(LocalDateTime.now().format(FORMATTER));
                 
-                sheetData.add(excelData);
+                batchData.add(excelData);
             }
         }
         
-        log.info("Extracted {} rows from sheet '{}' with {} columns", 
-                sheetData.size(), sheet.getSheetName(), headers.size());
-        
-        return sheetData;
+        return batchData;
     }
 
     private Object getCellValue(Cell cell) {
@@ -466,31 +759,103 @@ public class ExcelServiceImpl implements ExcelService {
             return null;
         }
         
-        switch (cell.getCellType()) {
-            case STRING:
-                return cell.getStringCellValue();
-            case NUMERIC:
-                if (DateUtil.isCellDateFormatted(cell)) {
-                    return cell.getDateCellValue().toString();
-                } else {
-                    return cell.getNumericCellValue();
-                }
-            case BOOLEAN:
-                return cell.getBooleanCellValue();
-            case FORMULA:
-                try {
-                    return cell.getNumericCellValue();
-                } catch (Exception e) {
+        try {
+            switch (cell.getCellType()) {
+                case STRING:
                     return cell.getStringCellValue();
-                }
-            default:
-                return null;
+                    
+                case NUMERIC:
+                    if (DateUtil.isCellDateFormatted(cell)) {
+                        // Return dates in a standard format
+                        try {
+                            return cell.getDateCellValue().toString();
+                        } catch (Exception e) {
+                            // Fall back to numeric value if date conversion fails
+                            return cell.getNumericCellValue();
+                        }
+                    } else {
+                        double value = cell.getNumericCellValue();
+                        // Check if it's an integer value stored as double
+                        if (value == Math.floor(value) && !Double.isInfinite(value)) {
+                            // It's an integer
+                            if (value >= Long.MIN_VALUE && value <= Long.MAX_VALUE) {
+                                return (long) value;
+                            }
+                        }
+                        return value;
+                    }
+                    
+                case BOOLEAN:
+                    return cell.getBooleanCellValue();
+                    
+                case FORMULA:
+                    // Try to evaluate the formula
+                    try {
+                        switch (cell.getCachedFormulaResultType()) {
+                            case NUMERIC:
+                                if (DateUtil.isCellDateFormatted(cell)) {
+                                    return cell.getDateCellValue().toString();
+                                } else {
+                                    double value = cell.getNumericCellValue();
+                                    if (value == Math.floor(value) && !Double.isInfinite(value)) {
+                                        if (value >= Long.MIN_VALUE && value <= Long.MAX_VALUE) {
+                                            return (long) value;
+                                        }
+                                    }
+                                    return value;
+                                }
+                            case STRING:
+                                return cell.getStringCellValue();
+                            case BOOLEAN:
+                                return cell.getBooleanCellValue();
+                            case ERROR:
+                                return "#ERROR";
+                            default:
+                                return cell.getCellFormula();
+                        }
+                    } catch (Exception e) {
+                        // If formula evaluation fails, return the formula itself
+                        try {
+                            return "="+cell.getCellFormula();
+                        } catch (Exception ex) {
+                            return "#FORMULA_ERROR";
+                        }
+                    }
+                    
+                case BLANK:
+                    return null;
+                    
+                case ERROR:
+                    return "#ERROR:" + cell.getErrorCellValue();
+                    
+                default:
+                    return null;
+            }
+        } catch (Exception e) {
+            // Safe fallback for any cell reading errors
+            log.debug("Error reading cell value: {}", e.getMessage());
+            return "#ERROR_READING_CELL";
         }
     }
 
     private String getCellValueAsString(Cell cell) {
         Object value = getCellValue(cell);
-        return value != null ? value.toString() : "";
+        if (value == null) {
+            return "";
+        }
+        
+        // Format numeric values to avoid scientific notation
+        if (value instanceof Double) {
+            double doubleValue = (Double) value;
+            // Check if it's a whole number
+            if (doubleValue == Math.floor(doubleValue) && !Double.isInfinite(doubleValue)) {
+                return String.format("%.0f", doubleValue);
+            } else {
+                return String.valueOf(value);
+            }
+        }
+        
+        return String.valueOf(value);
     }
 
     private Map<String, Object> performNumericAnalysis(List<ExcelData> data) {

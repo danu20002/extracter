@@ -1,0 +1,46 @@
+syntax = "proto3";
+
+option java_package = "com.jnj.extracter.proto";
+option java_outer_classname = "ExcelDataProto";
+option java_multiple_files = true;
+
+// Represents a single Excel cell value
+message CellValue {
+  oneof value {
+    string string_value = 1;
+    double numeric_value = 2;
+    bool boolean_value = 3;
+    string date_value = 4; // ISO date format
+    string error_value = 5;
+  }
+}
+
+// Represents a single row of Excel data
+message ExcelRow {
+  string file_name = 1;
+  string sheet_name = 2;
+  int32 row_number = 3;
+  string extracted_at = 4;
+  map<string, CellValue> data = 5; // Map of column name to cell value
+}
+
+// Collection of Excel rows
+message ExcelRows {
+  repeated ExcelRow rows = 1;
+}
+
+// Represents the result of processing an Excel file
+message ExcelProcessingResult {
+  string file_name = 1;
+  bool success = 2;
+  string message = 3;
+  int32 total_sheets = 4;
+  int32 total_rows = 5;
+  repeated string sheet_names = 6;
+  ExcelRows extracted_data = 7;
+}
+
+// Collection of Excel processing results
+message ExcelProcessingResults {
+  repeated ExcelProcessingResult results = 1;
+}
