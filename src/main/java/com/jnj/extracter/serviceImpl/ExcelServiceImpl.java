@@ -26,6 +26,7 @@ import org.springframework.stereotype.Service;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.MappedByteBuffer;
@@ -922,5 +923,179 @@ public class ExcelServiceImpl implements ExcelService {
         analysis.put("operation", "numeric_analysis");
         
         return analysis;
+    }
+    
+    @Override
+    public List<ExcelData> transformDataByCombiningColumns(List<ExcelData> data, List<String> sourceColumns, 
+                                                         String targetColumn, String separator) {
+        log.info("Transforming data by combining columns: {} -> {}", sourceColumns, targetColumn);
+        List<ExcelData> transformedData = new ArrayList<>();
+        
+        if (separator == null) {
+            separator = "";
+        }
+        
+        for (ExcelData excelData : data) {
+            // Create a deep copy of the original data
+            ExcelData newData = new ExcelData();
+            newData.setFileName(excelData.getFileName());
+            newData.setSheetName(excelData.getSheetName());
+            newData.setRowNumber(excelData.getRowNumber());
+            newData.setExtractedAt(excelData.getExtractedAt());
+            
+            Map<String, Object> rowData = new HashMap<>(excelData.getData());
+            
+            // Build combined value from source columns
+            StringBuilder combinedValue = new StringBuilder();
+            boolean firstColumn = true;
+            
+            for (String columnName : sourceColumns) {
+                Object columnValue = rowData.get(columnName);
+                if (columnValue != null) {
+                    if (!firstColumn && !separator.isEmpty()) {
+                        combinedValue.append(separator);
+                    }
+                    combinedValue.append(columnValue.toString().trim());
+                    firstColumn = false;
+                }
+            }
+            
+            // Add the new combined column
+            rowData.put(targetColumn, combinedValue.toString());
+            newData.setData(rowData);
+            
+            transformedData.add(newData);
+        }
+        
+        log.info("Transformation complete. Created new column '{}' in {} records", 
+                targetColumn, transformedData.size());
+        
+        return transformedData;
+    }
+    
+    @Override
+    public String createTransformedExcelFile(List<ExcelData> data, 
+                                          Map<String, List<String>> transformationMap, 
+                                          Map<String, String> separatorMap, 
+                                          String outputFileName, 
+                                          boolean includeOriginalColumns) {
+        log.info("Creating transformed Excel file with {} column transformations", transformationMap.size());
+        
+        if (separatorMap == null) {
+            separatorMap = new HashMap<>();
+        }
+        
+        // Create a copy of the original data with transformed columns
+        List<Map<String, Object>> transformedRows = new ArrayList<>();
+        
+        for (ExcelData excelData : data) {
+            // Start with empty row or original data based on includeOriginalColumns flag
+            Map<String, Object> transformedRow = includeOriginalColumns ? 
+                new HashMap<>(excelData.getData()) : new HashMap<>();
+            
+            // Apply each transformation
+            for (Map.Entry<String, List<String>> transformation : transformationMap.entrySet()) {
+                String targetColumn = transformation.getKey();
+                List<String> sourceColumns = transformation.getValue();
+                String separator = separatorMap.getOrDefault(targetColumn, "");
+                
+                // Build combined value from source columns
+                StringBuilder combinedValue = new StringBuilder();
+                boolean firstColumn = true;
+                
+                for (String columnName : sourceColumns) {
+                    Object columnValue = excelData.getData().get(columnName);
+                    if (columnValue != null) {
+                        if (!firstColumn && !separator.isEmpty()) {
+                            combinedValue.append(separator);
+                        }
+                        combinedValue.append(columnValue.toString().trim());
+                        firstColumn = false;
+                    }
+                }
+                
+                // Add the transformed column to the row
+                transformedRow.put(targetColumn, combinedValue.toString());
+            }
+            
+            transformedRows.add(transformedRow);
+        }
+        
+        // Ensure output file has proper extension
+        if (!outputFileName.toLowerCase().endsWith(".xlsx") && 
+            !outputFileName.toLowerCase().endsWith(".xls")) {
+            outputFileName += ".xlsx";
+        }
+        
+        // Create directory if it doesn't exist
+        File outputDir = new File(TEMP_FOLDER_PATH);
+        if (!outputDir.exists()) {
+            outputDir.mkdirs();
+        }
+        
+        // Create full path for output file
+        String outputFilePath = TEMP_FOLDER_PATH + File.separator + outputFileName;
+        File outputFile = new File(outputFilePath);
+        
+        try (Workbook workbook = new XSSFWorkbook()) {
+            Sheet sheet = workbook.createSheet("Transformed Data");
+            
+            // Create header row
+            Row headerRow = sheet.createRow(0);
+            
+            // Get all column names from the first row
+            Set<String> columnNames = new HashSet<>();
+            if (!transformedRows.isEmpty()) {
+                columnNames.addAll(transformedRows.get(0).keySet());
+            }
+            
+            // Create header cells
+            int cellIndex = 0;
+            for (String columnName : columnNames) {
+                Cell cell = headerRow.createCell(cellIndex++);
+                cell.setCellValue(columnName);
+            }
+            
+            // Create data rows
+            for (int rowIndex = 0; rowIndex < transformedRows.size(); rowIndex++) {
+                Row row = sheet.createRow(rowIndex + 1);  // +1 to account for header
+                Map<String, Object> rowData = transformedRows.get(rowIndex);
+                
+                cellIndex = 0;
+                for (String columnName : columnNames) {
+                    Cell cell = row.createCell(cellIndex++);
+                    Object value = rowData.get(columnName);
+                    
+                    if (value != null) {
+                        if (value instanceof Number) {
+                            cell.setCellValue(((Number) value).doubleValue());
+                        } else if (value instanceof Boolean) {
+                            cell.setCellValue((Boolean) value);
+                        } else if (value instanceof Date) {
+                            cell.setCellValue((Date) value);
+                        } else {
+                            cell.setCellValue(value.toString());
+                        }
+                    }
+                }
+            }
+            
+            // Auto-size columns for better readability
+            for (int i = 0; i < columnNames.size(); i++) {
+                sheet.autoSizeColumn(i);
+            }
+            
+            // Write to file
+            try (FileOutputStream fileOut = new FileOutputStream(outputFile)) {
+                workbook.write(fileOut);
+            }
+            
+            log.info("Successfully created transformed Excel file at {}", outputFile.getAbsolutePath());
+            return outputFile.getAbsolutePath();
+            
+        } catch (Exception e) {
+            log.error("Error creating transformed Excel file: {}", e.getMessage(), e);
+            throw new RuntimeException("Failed to create transformed Excel file", e);
+        }
     }
 }

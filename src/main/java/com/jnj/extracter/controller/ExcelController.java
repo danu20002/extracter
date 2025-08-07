@@ -127,6 +127,228 @@ public class ExcelController {
     }
 
     /**
+     * Transform data by combining columns
+     */
+    @PostMapping("/transform/combine-columns")
+    public ResponseEntity<Map<String, Object>> transformByCombiningColumns(
+            @RequestBody Map<String, Object> requestBody) {
+        
+        try {
+            @SuppressWarnings("unchecked")
+            List<ExcelData> data = (List<ExcelData>) requestBody.get("data");
+            
+            @SuppressWarnings("unchecked")
+            List<String> sourceColumns = (List<String>) requestBody.get("sourceColumns");
+            
+            String targetColumn = (String) requestBody.get("targetColumn");
+            String separator = (String) requestBody.get("separator");
+            
+            if (data == null || sourceColumns == null || targetColumn == null || sourceColumns.isEmpty()) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid request. Required fields: data, sourceColumns, targetColumn");
+                return ResponseEntity.badRequest().body(error);
+            }
+            
+            List<ExcelData> transformedData = excelService.transformDataByCombiningColumns(
+                    data, sourceColumns, targetColumn, separator);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("transformedData", transformedData);
+            response.put("recordCount", transformedData.size());
+            response.put("sourceColumns", sourceColumns);
+            response.put("targetColumn", targetColumn);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Error during transformation: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+    
+    /**
+     * Create a new Excel file with multiple transformed columns
+     */
+    @PostMapping("/transform/create-excel")
+    public ResponseEntity<Map<String, Object>> createTransformedExcelFile(
+            @RequestBody Map<String, Object> requestBody) {
+        
+        try {
+            @SuppressWarnings("unchecked")
+            List<ExcelData> data = (List<ExcelData>) requestBody.get("data");
+            
+            @SuppressWarnings("unchecked")
+            Map<String, List<String>> transformationMap = (Map<String, List<String>>) requestBody.get("transformations");
+            
+            @SuppressWarnings("unchecked")
+            Map<String, String> separatorMap = (Map<String, String>) requestBody.get("separators");
+            
+            String outputFileName = (String) requestBody.get("outputFileName");
+            Boolean includeOriginalColumns = (Boolean) requestBody.get("includeOriginalColumns");
+            
+            if (data == null || transformationMap == null || transformationMap.isEmpty() || outputFileName == null) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid request. Required fields: data, transformations, outputFileName");
+                return ResponseEntity.badRequest().body(error);
+            }
+            
+            if (includeOriginalColumns == null) {
+                includeOriginalColumns = false;
+            }
+            
+            String filePath = excelService.createTransformedExcelFile(
+                    data, transformationMap, separatorMap, outputFileName, includeOriginalColumns);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("filePath", filePath);
+            response.put("fileName", new File(filePath).getName());
+            response.put("transformationCount", transformationMap.size());
+            response.put("recordCount", data.size());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Error creating transformed Excel file: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+    
+    /**
+     * Transform data for a specific file by combining columns
+     */
+    @PostMapping("/transform/file/{fileName}")
+    public ResponseEntity<Map<String, Object>> transformFileDataByCombiningColumns(
+            @PathVariable String fileName,
+            @RequestBody Map<String, Object> requestBody) {
+        
+        try {
+            List<File> files = excelService.getExcelFiles();
+            File targetFile = files.stream()
+                    .filter(file -> file.getName().equals(fileName))
+                    .findFirst()
+                    .orElse(null);
+    
+            if (targetFile == null) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "File not found: " + fileName);
+                return ResponseEntity.notFound().build();
+            }
+            
+            ExcelProcessingResult result = excelService.extractExcelFile(targetFile);
+            
+            if (!result.isSuccess()) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Failed to extract data from file: " + result.getMessage());
+                return ResponseEntity.badRequest().body(error);
+            }
+            
+            @SuppressWarnings("unchecked")
+            List<String> sourceColumns = (List<String>) requestBody.get("sourceColumns");
+            
+            String targetColumn = (String) requestBody.get("targetColumn");
+            String separator = (String) requestBody.get("separator");
+            
+            if (sourceColumns == null || targetColumn == null || sourceColumns.isEmpty()) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Invalid request. Required fields: sourceColumns, targetColumn");
+                return ResponseEntity.badRequest().body(error);
+            }
+            
+            List<ExcelData> transformedData = excelService.transformDataByCombiningColumns(
+                    result.getExtractedData(), sourceColumns, targetColumn, separator);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("transformedData", transformedData);
+            response.put("recordCount", transformedData.size());
+            response.put("fileName", fileName);
+            response.put("sourceColumns", sourceColumns);
+            response.put("targetColumn", targetColumn);
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Error during transformation: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+    
+    /**
+     * Create a new Excel file with multiple column transformations from a source file
+     */
+    @PostMapping("/transform/file/{fileName}/create-excel")
+    public ResponseEntity<Map<String, Object>> createTransformedExcelFromFile(
+            @PathVariable String fileName,
+            @RequestBody Map<String, Object> requestBody) {
+        
+        try {
+            List<File> files = excelService.getExcelFiles();
+            File targetFile = files.stream()
+                    .filter(file -> file.getName().equals(fileName))
+                    .findFirst()
+                    .orElse(null);
+    
+            if (targetFile == null) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "File not found: " + fileName);
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Extract data from file
+            ExcelProcessingResult result = excelService.extractExcelFile(targetFile);
+            
+            if (!result.isSuccess()) {
+                Map<String, Object> error = new HashMap<>();
+                error.put("error", "Failed to extract data from file: " + result.getMessage());
+                return ResponseEntity.badRequest().body(error);
+            }
+            
+            @SuppressWarnings("unchecked")
+            Map<String, List<String>> transformationMap = (Map<String, List<String>>) requestBody.get("transformations");
+            
+            @SuppressWarnings("unchecked")
+            Map<String, String> separatorMap = (Map<String, String>) requestBody.get("separators");
+            
+            String outputFileName = (String) requestBody.get("outputFileName");
+            Boolean includeOriginalColumns = (Boolean) requestBody.get("includeOriginalColumns");
+            
+            // Default output filename if not provided
+            if (outputFileName == null || outputFileName.trim().isEmpty()) {
+                String baseName = fileName.substring(0, fileName.lastIndexOf('.'));
+                outputFileName = baseName + "_transformed.xlsx";
+            }
+            
+            if (includeOriginalColumns == null) {
+                includeOriginalColumns = false;
+            }
+            
+            // Create transformed Excel file
+            String filePath = excelService.createTransformedExcelFile(
+                    result.getExtractedData(), 
+                    transformationMap, 
+                    separatorMap, 
+                    outputFileName, 
+                    includeOriginalColumns);
+            
+            Map<String, Object> response = new HashMap<>();
+            response.put("success", true);
+            response.put("filePath", filePath);
+            response.put("fileName", new File(filePath).getName());
+            response.put("sourceFile", fileName);
+            response.put("transformationCount", transformationMap.size());
+            response.put("recordCount", result.getExtractedData().size());
+            
+            return ResponseEntity.ok(response);
+        } catch (Exception e) {
+            Map<String, Object> error = new HashMap<>();
+            error.put("error", "Error creating transformed Excel file: " + e.getMessage());
+            return ResponseEntity.badRequest().body(error);
+        }
+    }
+
+    /**
      * Health check endpoint
      */
     @GetMapping("/health")

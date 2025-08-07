@@ -43,4 +43,32 @@ public interface ExcelService {
      * Get summary statistics of the extracted data
      */
     Map<String, Object> getDataSummary(List<ExcelData> data);
+    
+    /**
+     * Transform data by combining columns
+     * 
+     * @param data The Excel data to transform
+     * @param sourceColumns List of source column names to combine
+     * @param targetColumn Name of the new column to create
+     * @param separator Optional separator between combined values (default: no separator)
+     * @return The transformed Excel data
+     */
+    List<ExcelData> transformDataByCombiningColumns(List<ExcelData> data, List<String> sourceColumns, 
+                                                  String targetColumn, String separator);
+                                                  
+    /**
+     * Create a new Excel file with multiple transformed columns
+     * 
+     * @param data The Excel data to transform
+     * @param transformationMap Map of target column names to lists of source columns
+     * @param separatorMap Map of target column names to separators (optional)
+     * @param outputFileName Name of the output Excel file
+     * @param includeOriginalColumns Whether to include original columns in the output
+     * @return Path to the created Excel file
+     */
+    String createTransformedExcelFile(List<ExcelData> data, 
+                                     Map<String, List<String>> transformationMap,
+                                     Map<String, String> separatorMap,
+                                     String outputFileName,
+                                     boolean includeOriginalColumns);
 }

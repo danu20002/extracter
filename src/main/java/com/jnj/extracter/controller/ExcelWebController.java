@@ -5,6 +5,8 @@ import com.jnj.extracter.entity.ExcelFileInfo;
 import com.jnj.extracter.entity.ExcelProcessingResult;
 import com.jnj.extracter.service.ExcelService;
 import lombok.RequiredArgsConstructor;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
 import org.springframework.web.bind.annotation.*;
@@ -219,5 +221,44 @@ public class ExcelWebController {
         model.addAttribute("result", analysisResult);
         
         return "excel/analysis-result";
+    }
+    
+    /**
+     * Data transformation page - for combining columns
+     */
+    @GetMapping("/transform")
+    public String transformData(Model model) {
+        List<File> files = excelService.getExcelFiles();
+        List<ExcelFileInfo> fileInfoList = convertToFileInfoList(files);
+        model.addAttribute("files", fileInfoList);
+        return "excel/transform";
+    }
+    
+    /**
+     * Download transformed Excel files from temp directory
+     */
+    @GetMapping("/temp/{fileName:.+}")
+    public ResponseEntity<byte[]> downloadTransformedFile(@PathVariable String fileName) {
+        try {
+            // Create temp directory path
+            String tempDirPath = "excel/temp";
+            File tempFile = new File(tempDirPath, fileName);
+            
+            if (!tempFile.exists()) {
+                return ResponseEntity.notFound().build();
+            }
+            
+            // Read file into byte array
+            byte[] fileContent = java.nio.file.Files.readAllBytes(tempFile.toPath());
+            
+            // Set appropriate headers
+            return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=\"" + fileName + "\"")
+                .header("Content-Type", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+                .body(fileContent);
+                
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).build();
+        }
     }
 }
