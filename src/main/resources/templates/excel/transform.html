@@ -4,8 +4,26 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Excel Data Transformation</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
     <style>
+        /* Loading overlay styles */
+        #loadingOverlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            background: rgba(255,255,255,0.7);
+            z-index: 9999;
+            display: none;
+            align-items: center;
+            justify-content: center;
+        }
+        #loadingOverlay .spinner-border {
+            width: 4rem;
+            height: 4rem;
+        }
         .container {
             max-width: 1200px;
             margin-top: 30px;
@@ -72,8 +90,18 @@
     </style>
 </head>
 <body>
+    <div id="loadingOverlay">
+        <div class="spinner-border text-primary" role="status">
+            <span class="visually-hidden">Loading...</span>
+        </div>
+    </div>
     <div class="container">
         <h1 class="mb-4">Excel Data Transformation</h1>
+        <div class="mb-4">
+            <a href="/api/transform/generate-journal" class="btn btn-primary" download>
+                Download Journal File
+            </a>
+        </div>
         
         <div class="card">
             <div class="card-header">
@@ -174,6 +202,9 @@
                         <a id="downloadLink" class="btn btn-success" target="_blank">
                             Download Transformed Excel
                         </a>
+                        <a href="/api/transform/generate-journal" class="btn btn-primary" download>
+                            Download Journal File
+                        </a>
                         <a href="/excel" class="btn btn-secondary ml-2">Back to Dashboard</a>
                     </div>
                 </div>
@@ -242,32 +273,41 @@
             });
         }
         
+        function showLoading() {
+            $("#loadingOverlay").show();
+        }
+        function hideLoading() {
+            $("#loadingOverlay").hide();
+        }
+
         function loadExcelFiles() {
+            showLoading();
             $.ajax({
                 url: "/api/excel/files",
                 type: "GET",
                 success: function(data) {
                     $("#fileSelect").empty();
                     $("#fileSelect").append('<option value="">-- Select File --</option>');
-                    
                     data.forEach(function(fileName) {
                         $("#fileSelect").append(`<option value="${fileName}">${fileName}</option>`);
                     });
+                    hideLoading();
                 },
                 error: function(xhr) {
+                    hideLoading();
                     alert("Error loading Excel files: " + xhr.responseText);
                 }
             });
         }
         
         function loadSheets(fileName) {
+            showLoading();
             $.ajax({
                 url: `/api/excel/extract/${fileName}`,
                 type: "GET",
                 success: function(data) {
                     $("#sheetSelect").empty();
                     $("#sheetSelect").append('<option value="">-- Select Sheet --</option>');
-                    
                     if (data.sheetNames && data.sheetNames.length > 0) {
                         data.sheetNames.forEach(function(sheetName) {
                             $("#sheetSelect").append(`<option value="${sheetName}">${sheetName}</option>`);
@@ -276,8 +316,10 @@
                     } else {
                         alert("No sheets found in the selected file.");
                     }
+                    hideLoading();
                 },
                 error: function(xhr) {
+                    hideLoading();
                     alert("Error loading sheets: " + xhr.responseText);
                 }
             });
@@ -286,9 +328,8 @@
         function loadSheetColumns() {
             const fileName = $("#fileSelect").val();
             const sheetName = $("#sheetSelect").val();
-            
             if (!fileName || !sheetName) return;
-            
+            showLoading();
             $.ajax({
                 url: `/api/excel/extract/${fileName}/${sheetName}`,
                 type: "GET",
@@ -297,7 +338,6 @@
                         // Get column names from the first row
                         const columns = Object.keys(data[0].data);
                         window.availableColumns = columns;
-                        
                         // Populate available columns container
                         $("#availableColumnsContainer").empty();
                         columns.forEach(function(column) {
@@ -307,20 +347,19 @@
                                 </div>
                             `);
                         });
-                        
                         // Clear any existing transformations
                         $("#transformationsContainer").empty();
                         window.transformationCounter = 0;
-                        
                         // Add initial transformation row
                         addNewTransformationRow();
-                        
                         $("#transformationCard").show();
                     } else {
                         alert("No data found in the selected sheet.");
                     }
+                    hideLoading();
                 },
                 error: function(xhr) {
+                    hideLoading();
                     alert("Error loading sheet data: " + xhr.responseText);
                 }
             });
@@ -419,41 +458,34 @@
             const fileName = $("#fileSelect").val();
             const outputFileName = $("#outputFileName").val();
             const includeOriginalColumns = $("#includeOriginalColumns").is(":checked");
-            
             // Get all transformations
             const transformationData = getTransformationData();
-            
             if (Object.keys(transformationData.transformations).length === 0) {
                 alert("Please configure at least one column transformation.");
                 return;
             }
-            
             if (!outputFileName) {
                 alert("Please enter a name for the output file.");
                 return;
             }
-            
-            // Show spinner
+            showLoading();
             $("#transformBtn").prop("disabled", true);
             $("#transformSpinner").show();
-            
             const requestData = {
                 transformations: transformationData.transformations,
                 separators: transformationData.separators,
                 outputFileName: outputFileName,
                 includeOriginalColumns: includeOriginalColumns
             };
-            
             $.ajax({
                 url: `/api/excel/transform/file/${fileName}/create-excel`,
                 type: "POST",
                 contentType: "application/json",
                 data: JSON.stringify(requestData),
                 success: function(response) {
-                    // Hide spinner
                     $("#transformBtn").prop("disabled", false);
                     $("#transformSpinner").hide();
-                    
+                    hideLoading();
                     if (response.success) {
                         displayTransformationResult(response);
                     } else {
@@ -463,6 +495,7 @@
                 error: function(xhr) {
                     $("#transformBtn").prop("disabled", false);
                     $("#transformSpinner").hide();
+                    hideLoading();
                     alert("Error during transformation: " + xhr.responseText);
                 }
             });
