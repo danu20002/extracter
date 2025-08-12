@@ -1,0 +1,285 @@
+{
+	"info": {
+		"_postman_id": "5e8b9f2d-1f9c-4e13-8b5a-8f5e6b0e1234",
+		"name": "Excel Data Explorer API",
+		"description": "Collection for testing Excel Data Explorer API endpoints",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "Web UI Endpoints",
+			"item": [
+				{
+					"name": "Get Dashboard",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/excel/dashboard",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"excel",
+								"dashboard"
+							]
+						},
+						"description": "Main dashboard page of the application"
+					},
+					"response": []
+				},
+				{
+					"name": "List Excel Files",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/excel/files",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"excel",
+								"files"
+							]
+						},
+						"description": "List all Excel files in the system"
+					},
+					"response": []
+				},
+				{
+					"name": "View Excel File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/excel/file/Journal.xlsx",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"excel",
+								"file",
+								"Journal.xlsx"
+							]
+						},
+						"description": "View a specific Excel file and its sheets"
+					},
+					"response": []
+				},
+				{
+					"name": "Upload Excel File",
+					"request": {
+						"method": "POST",
+						"header": [],
+						"body": {
+							"mode": "formdata",
+							"formdata": [
+								{
+									"key": "file",
+									"type": "file",
+									"src": "/path/to/test.xlsx",
+									"description": "Excel file to upload"
+								}
+							]
+						},
+						"url": {
+							"raw": "{{baseUrl}}/excel/upload",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"excel",
+								"upload"
+							]
+						},
+						"description": "Upload a new Excel file to the system"
+					},
+					"response": []
+				}
+			],
+			"description": "Web UI endpoints for Excel Data Explorer application"
+		},
+		{
+			"name": "Excel API Endpoints",
+			"item": [
+				{
+					"name": "Get Sheet Names",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/excel/sheets/Journal.xlsx",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"excel",
+								"sheets",
+								"Journal.xlsx"
+							]
+						},
+						"description": "Get names of all sheets in a specific Excel file"
+					},
+					"response": []
+				},
+				{
+					"name": "Transform - Combine Columns",
+					"request": {
+						"method": "POST",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/transform/combine?sourceColumns=Column1,Column2&targetColumn=Combined&separator=%20&fileName=transformed.xlsx&includeOriginalColumns=true",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transform",
+								"combine"
+							],
+							"query": [
+								{
+									"key": "sourceColumns",
+									"value": "Column1,Column2",
+									"description": "Source columns to combine (comma-separated)"
+								},
+								{
+									"key": "targetColumn",
+									"value": "Combined",
+									"description": "Target column name for combined values"
+								},
+								{
+									"key": "separator",
+									"value": "%20",
+									"description": "Separator for combining values (URL-encoded space)"
+								},
+								{
+									"key": "fileName",
+									"value": "transformed.xlsx",
+									"description": "Output file name"
+								},
+								{
+									"key": "includeOriginalColumns",
+									"value": "true",
+									"description": "Whether to include original columns in output"
+								}
+							]
+						},
+						"description": "Transform Excel data by combining columns"
+					},
+					"response": []
+				},
+				{
+					"name": "Download Transformed File",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/api/transform/download/transformed.xlsx",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"transform",
+								"download",
+								"transformed.xlsx"
+							]
+						},
+						"description": "Download a transformed Excel file"
+					},
+					"response": []
+				},
+				{
+					"name": "Get Excel Stats",
+					"request": {
+						"method": "GET",
+						"header": [
+							{
+								"key": "Accept",
+								"value": "application/json"
+							}
+						],
+						"url": {
+							"raw": "{{baseUrl}}/api/stats",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"api",
+								"stats"
+							]
+						},
+						"description": "Get Excel processing statistics"
+					},
+					"response": []
+				}
+			],
+			"description": "REST API endpoints for Excel Data Explorer application"
+		},
+		{
+			"name": "Test UI",
+			"item": [
+				{
+					"name": "URL Tester Page",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": {
+							"raw": "{{baseUrl}}/test/endpoints",
+							"host": [
+								"{{baseUrl}}"
+							],
+							"path": [
+								"test",
+								"endpoints"
+							]
+						},
+						"description": "Web UI for testing all endpoints"
+					},
+					"response": []
+				}
+			],
+			"description": "Testing tools for the application"
+		}
+	],
+	"event": [
+		{
+			"listen": "prerequest",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		},
+		{
+			"listen": "test",
+			"script": {
+				"type": "text/javascript",
+				"exec": [
+					""
+				]
+			}
+		}
+	],
+	"variable": [
+		{
+			"key": "baseUrl",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}
